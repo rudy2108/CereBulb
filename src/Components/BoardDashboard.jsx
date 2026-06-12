@@ -9,6 +9,7 @@ import {
   Send,
   Pencil,
   MoreHorizontal,
+  Flag,
 } from "lucide-react";
 
 // Constants
@@ -31,13 +32,14 @@ function BoardDashboard() {
   // Consolidated state for creating tasks
   const [creatingColumn, setCreatingColumn] = useState(null);
   const [taskDescription, setTaskDescription] = useState("");
+  const [taskPriority, setTaskPriority] = useState("medium"); // low, medium, high
+  const [priorityDropdownOpen, setPriorityDropdownOpen] = useState(false);
 
   // Consolidated state for editing tasks
   const [editingTask, setEditingTask] = useState(null); // { column, id, text }
 
   // Consolidated state for menu
-  const [menuTask, setMenuTask] = useState(null); // { column, id }
-  const [openSubmenu, setOpenSubmenu] = useState(null);
+  const [menuState, setMenuState] = useState(null); // { column, id, openSubmenu }
   const menuRef = useRef(null);
 
   // Persist tasks to localStorage whenever they change
@@ -49,16 +51,16 @@ function BoardDashboard() {
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (menuRef.current && !menuRef.current.contains(event.target)) {
-        setMenuTask(null);
+        setMenuState(null);
       }
     };
 
-    if (menuTask) {
+    if (menuState) {
       document.addEventListener("mousedown", handleClickOutside);
       return () =>
         document.removeEventListener("mousedown", handleClickOutside);
     }
-  }, [menuTask]);
+  }, [menuState]);
 
   // Memoized handlers
   const handleFilterClick = useCallback(() => {
@@ -68,6 +70,8 @@ function BoardDashboard() {
   const handleCreateClick = useCallback((column) => {
     setCreatingColumn(column);
     setTaskDescription("");
+    setTaskPriority("medium");
+    setPriorityDropdownOpen(false);
   }, []);
 
   const handleSaveTask = useCallback(() => {
@@ -76,17 +80,20 @@ function BoardDashboard() {
         ...prev,
         [creatingColumn]: [
           ...prev[creatingColumn],
-          { id: Date.now(), description: taskDescription, completed: false },
+          { id: Date.now(), description: taskDescription, completed: false, priority: taskPriority },
         ],
       }));
       setCreatingColumn(null);
       setTaskDescription("");
+      setTaskPriority("medium");
     }
-  }, [taskDescription, creatingColumn]);
+  }, [taskDescription, creatingColumn, taskPriority]);
 
   const handleCancelCreate = useCallback(() => {
     setCreatingColumn(null);
     setTaskDescription("");
+    setTaskPriority("medium");
+    setPriorityDropdownOpen(false);
   }, []);
 
   // Helper function to move task between columns
@@ -132,21 +139,18 @@ function BoardDashboard() {
   }, []);
 
   const handleMenuClick = useCallback((column, taskId) => {
-    setMenuTask({ column, id: taskId });
-    setOpenSubmenu(null);
+    setMenuState({ column, id: taskId, openSubmenu: null });
   }, []);
 
   const handleChangeStatus = useCallback(
     (newColumn, currentColumn, task) => {
       if (newColumn === currentColumn) {
-        setMenuTask(null);
-        setOpenSubmenu(null);
+        setMenuState(null);
         return;
       }
 
       moveTask(task, currentColumn, newColumn);
-      setMenuTask(null);
-      setOpenSubmenu(null);
+      setMenuState(null);
     },
     [moveTask],
   );
@@ -164,14 +168,17 @@ function BoardDashboard() {
 
   const handleSubMenuClick = useCallback((submenuName, e) => {
     e.stopPropagation();
-    setOpenSubmenu((prev) => (prev === submenuName ? null : submenuName));
+    setMenuState((prev) =>
+      prev && prev.openSubmenu === submenuName
+        ? { ...prev, openSubmenu: null }
+        : { ...prev, openSubmenu: submenuName }
+    );
   }, []);
 
   const handleDeleteMenuClick = useCallback(
     (column, task) => {
       handleDeleteTask(column, task.id);
-      setMenuTask(null);
-      setOpenSubmenu(null);
+      setMenuState(null);
     },
     [handleDeleteTask],
   );
@@ -267,7 +274,26 @@ function BoardDashboard() {
                     <>
                       {/* Task Header with Edit Button and Menu */}
                       <div className="flex items-start justify-between gap-2 mb-2">
-                        <div className="flex items-center gap-1 flex-1">
+                        <div className="flex items-center gap-2 flex-1">
+                          {task.priority && (
+                            <Flag
+                              size={14}
+                              className={`flex-shrink-0 ${
+                                task.priority === "high"
+                                  ? "text-red-500"
+                                  : task.priority === "medium"
+                                    ? "text-yellow-600"
+                                    : "text-blue-500"
+                              }`}
+                              fill={
+                                task.priority === "high"
+                                  ? "currentColor"
+                                  : task.priority === "medium"
+                                    ? "currentColor"
+                                    : "none"
+                              }
+                            />
+                          )}
                           <p
                             className={`text-sm font-medium text-slate-700 ${
                               column === "DONE"
@@ -290,9 +316,9 @@ function BoardDashboard() {
                         <div
                           className="relative"
                           ref={
-                            menuTask &&
-                            menuTask.column === column &&
-                            menuTask.id === task.id
+                            menuState &&
+                            menuState.column === column &&
+                            menuState.id === task.id
                               ? menuRef
                               : null
                           }
@@ -306,9 +332,9 @@ function BoardDashboard() {
                           </button>
 
                           {/* Dropdown Menu */}
-                          {menuTask &&
-                            menuTask.column === column &&
-                            menuTask.id === task.id && (
+                          {menuState &&
+                            menuState.column === column &&
+                            menuState.id === task.id && (
                               <div className="absolute right-0 mt-2 w-48 bg-white border border-slate-200 rounded-lg shadow-lg z-10">
                                 {/* Change status with submenu */}
                                 <div className="relative">
@@ -320,14 +346,14 @@ function BoardDashboard() {
                                   >
                                     <span>Change status</span>
                                     <span
-                                      className={`transition-transform ${openSubmenu === "changeStatus" ? "rotate-90" : ""}`}
+                                      className={`transition-transform ${menuState.openSubmenu === "changeStatus" ? "rotate-90" : ""}`}
                                     >
                                       &gt;
                                     </span>
                                   </button>
 
                                   {/* Change Status Submenu */}
-                                  {openSubmenu === "changeStatus" && (
+                                  {menuState.openSubmenu === "changeStatus" && (
                                     <div className="absolute left-full top-0 ml-1 w-40 bg-white border border-slate-200 rounded-lg shadow-lg">
                                       {COLUMNS.map((col) => (
                                         <button
@@ -407,6 +433,56 @@ function BoardDashboard() {
                     <button className="p-1 hover:bg-blue-100 rounded transition-colors text-slate-500">
                       <UserPlus size={18} />
                     </button>
+                    <div className="relative">
+                      <button
+                        onClick={() => setPriorityDropdownOpen(!priorityDropdownOpen)}
+                        className={`p-1 rounded transition-colors ${
+                          taskPriority === "high"
+                            ? "bg-red-100 text-red-500"
+                            : taskPriority === "medium"
+                              ? "bg-yellow-100 text-yellow-600"
+                              : "bg-blue-100 text-slate-500"
+                        } hover:opacity-80`}
+                        title={`Priority: ${taskPriority}`}
+                      >
+                        <Flag size={18} />
+                      </button>
+                      {priorityDropdownOpen && (
+                        <div className="absolute left-0 mt-1 w-32 bg-white border border-slate-200 rounded-lg shadow-lg z-10">
+                          {["low", "medium", "high"].map((priority) => (
+                            <button
+                              key={priority}
+                              onClick={() => {
+                                setTaskPriority(priority);
+                                setPriorityDropdownOpen(false);
+                              }}
+                              className={`w-full text-left px-4 py-2 text-sm capitalize hover:bg-slate-100 transition-colors flex items-center gap-2 ${
+                                taskPriority === priority
+                                  ? priority === "high"
+                                    ? "bg-red-100 text-red-700"
+                                    : priority === "medium"
+                                      ? "bg-yellow-100 text-yellow-700"
+                                      : "bg-blue-100 text-blue-700"
+                                  : "text-slate-700"
+                              }`}
+                            >
+                              <Flag
+                                size={14}
+                                className={
+                                  priority === "high"
+                                    ? "text-red-500"
+                                    : priority === "medium"
+                                      ? "text-yellow-600"
+                                      : "text-blue-500"
+                                }
+                                fill={priority === "high" || priority === "medium" ? "currentColor" : "none"}
+                              />
+                              {priority}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   {/* Action Buttons */}
