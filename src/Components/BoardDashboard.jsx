@@ -10,7 +10,10 @@ import {
   Pencil,
   MoreHorizontal,
   Flag,
+  CalendarDays,
+  X,
 } from "lucide-react";
+import TaskDetailModal from "./TaskDetailModal";
 
 // Constants
 const COLUMNS = ["IN PROGRESS", "TO DO", "DONE"];
@@ -34,6 +37,9 @@ function BoardDashboard() {
   const [taskDescription, setTaskDescription] = useState("");
   const [taskPriority, setTaskPriority] = useState("medium"); // low, medium, high
   const [priorityDropdownOpen, setPriorityDropdownOpen] = useState(false);
+  const [taskDueDate, setTaskDueDate] = useState("");
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
+  const datePickerRef = useRef(null);
 
   // Consolidated state for editing tasks
   const [editingTask, setEditingTask] = useState(null); // { column, id, text }
@@ -41,6 +47,9 @@ function BoardDashboard() {
   // Consolidated state for menu
   const [menuState, setMenuState] = useState(null); // { column, id, openSubmenu }
   const menuRef = useRef(null);
+
+  // State for task detail modal
+  const [selectedTask, setSelectedTask] = useState(null); // { task, column }
 
   // Persist tasks to localStorage whenever they change
   useEffect(() => {
@@ -62,6 +71,21 @@ function BoardDashboard() {
     }
   }, [menuState]);
 
+  // Close date picker when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (datePickerRef.current && !datePickerRef.current.contains(event.target)) {
+        setDatePickerOpen(false);
+      }
+    };
+
+    if (datePickerOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () =>
+        document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [datePickerOpen]);
+
   // Memoized handlers
   const handleFilterClick = useCallback(() => {
     setFilterOpen((prev) => !prev);
@@ -72,6 +96,8 @@ function BoardDashboard() {
     setTaskDescription("");
     setTaskPriority("medium");
     setPriorityDropdownOpen(false);
+    setTaskDueDate("");
+    setDatePickerOpen(false);
   }, []);
 
   const handleSaveTask = useCallback(() => {
@@ -80,21 +106,68 @@ function BoardDashboard() {
         ...prev,
         [creatingColumn]: [
           ...prev[creatingColumn],
-          { id: Date.now(), description: taskDescription, completed: false, priority: taskPriority },
+          { id: Date.now(), description: taskDescription, completed: false, priority: taskPriority, dueDate: taskDueDate || null, createdAt: new Date().toISOString() },
         ],
       }));
       setCreatingColumn(null);
       setTaskDescription("");
       setTaskPriority("medium");
+      setTaskDueDate("");
+      setDatePickerOpen(false);
     }
-  }, [taskDescription, creatingColumn, taskPriority]);
+  }, [taskDescription, creatingColumn, taskPriority, taskDueDate]);
 
   const handleCancelCreate = useCallback(() => {
     setCreatingColumn(null);
     setTaskDescription("");
     setTaskPriority("medium");
     setPriorityDropdownOpen(false);
+    setTaskDueDate("");
+    setDatePickerOpen(false);
   }, []);
+
+  // Helper to format date for display
+  const formatDueDate = (dateStr) => {
+    if (!dateStr) return null;
+    const date = new Date(dateStr + "T00:00:00");
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    if (date.getTime() === today.getTime()) return "Today";
+    if (date.getTime() === tomorrow.getTime()) return "Tomorrow";
+
+    return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  };
+
+  // Helper to get due date color
+  const getDueDateColor = (dateStr) => {
+    if (!dateStr) return "";
+    const date = new Date(dateStr + "T00:00:00");
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    if (date < today) return "text-red-500 bg-red-50";
+    if (date.getTime() === today.getTime()) return "text-orange-600 bg-orange-50";
+    return "text-green-600 bg-green-50";
+  };
+
+  // Quick date helpers
+  const getToday = () => {
+    const d = new Date();
+    return d.toISOString().split("T")[0];
+  };
+  const getTomorrow = () => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().split("T")[0];
+  };
+  const getNextWeek = () => {
+    const d = new Date();
+    d.setDate(d.getDate() + 7);
+    return d.toISOString().split("T")[0];
+  };
 
   // Helper function to move task between columns
   const moveTask = useCallback(
@@ -182,6 +255,41 @@ function BoardDashboard() {
     },
     [handleDeleteTask],
   );
+
+  // Open task detail modal
+  const handleOpenTask = useCallback((column, task) => {
+    setSelectedTask({ task, column });
+  }, []);
+
+  // Update task fields from modal
+  const handleUpdateTask = useCallback((column, taskId, updates) => {
+    setTasks((prev) => ({
+      ...prev,
+      [column]: prev[column].map((task) =>
+        task.id === taskId ? { ...task, ...updates } : task
+      ),
+    }));
+    // Also update selectedTask if it's the one being edited
+    setSelectedTask((prev) => {
+      if (prev && prev.task.id === taskId && prev.column === column) {
+        return { ...prev, task: { ...prev.task, ...updates } };
+      }
+      return prev;
+    });
+  }, []);
+
+  // Handle status change from modal (moves task between columns)
+  const handleModalChangeStatus = useCallback((newColumn, currentColumn, task) => {
+    if (newColumn === currentColumn) return;
+    moveTask(task, currentColumn, newColumn);
+    // Update selectedTask's column
+    setSelectedTask((prev) => {
+      if (prev && prev.task.id === task.id) {
+        return { ...prev, column: newColumn };
+      }
+      return prev;
+    });
+  }, [moveTask]);
 
   return (
     <div className="p-6 h-full bg-white">
@@ -295,10 +403,11 @@ function BoardDashboard() {
                             />
                           )}
                           <p
-                            className={`text-sm font-medium text-slate-700 ${
+                            onClick={() => handleOpenTask(column, task)}
+                            className={`text-sm font-medium cursor-pointer hover:text-blue-600 transition-colors ${
                               column === "DONE"
                                 ? "line-through text-slate-400"
-                                : ""
+                                : "text-slate-700"
                             }`}
                           >
                             {task.description}
@@ -404,6 +513,12 @@ function BoardDashboard() {
                           <Check size={14} />
                           {column === "DONE" ? "Reopen" : "Complete"}
                         </button>
+                        {task.dueDate && (
+                          <span className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium ${getDueDateColor(task.dueDate)}`}>
+                            <CalendarDays size={12} />
+                            {formatDueDate(task.dueDate)}
+                          </span>
+                        )}
                       </div>
                     </>
                   )}
@@ -427,15 +542,105 @@ function BoardDashboard() {
                     <button className="p-1 hover:bg-blue-100 rounded transition-colors text-slate-500">
                       <Check size={18} />
                     </button>
-                    <button className="p-1 hover:bg-blue-100 rounded transition-colors text-slate-500">
-                      <Clock size={18} />
-                    </button>
+                    <div className="relative" ref={datePickerRef}>
+                      <button
+                        onClick={() => { setDatePickerOpen(!datePickerOpen); setPriorityDropdownOpen(false); }}
+                        className={`p-1 rounded transition-colors ${
+                          taskDueDate
+                            ? "bg-blue-100 text-blue-600"
+                            : "text-slate-500 hover:bg-blue-100"
+                        }`}
+                        title={taskDueDate ? `Due: ${formatDueDate(taskDueDate)}` : "Set due date"}
+                      >
+                        <Clock size={18} />
+                      </button>
+
+                      {/* Date Picker Popup */}
+                      {datePickerOpen && (
+                        <div className="absolute left-0 bottom-full mb-2 w-56 bg-white border border-slate-200 rounded-xl shadow-xl z-20 overflow-hidden">
+                          {/* Header */}
+                          <div className="flex items-center justify-between px-3 py-2 bg-gradient-to-r from-blue-500 to-indigo-500">
+                            <span className="text-white text-xs font-semibold">Set Due Date</span>
+                            <button
+                              onClick={() => setDatePickerOpen(false)}
+                              className="text-white/80 hover:text-white transition-colors"
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+
+                          {/* Quick Options */}
+                          <div className="p-2 space-y-1">
+                            <button
+                              onClick={() => { setTaskDueDate(getToday()); setDatePickerOpen(false); }}
+                              className={`w-full text-left px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 ${
+                                taskDueDate === getToday()
+                                  ? "bg-blue-100 text-blue-700 font-medium"
+                                  : "text-slate-700 hover:bg-slate-100"
+                              }`}
+                            >
+                              <CalendarDays size={14} className="text-orange-500" />
+                              Today
+                            </button>
+                            <button
+                              onClick={() => { setTaskDueDate(getTomorrow()); setDatePickerOpen(false); }}
+                              className={`w-full text-left px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 ${
+                                taskDueDate === getTomorrow()
+                                  ? "bg-blue-100 text-blue-700 font-medium"
+                                  : "text-slate-700 hover:bg-slate-100"
+                              }`}
+                            >
+                              <CalendarDays size={14} className="text-yellow-500" />
+                              Tomorrow
+                            </button>
+                            <button
+                              onClick={() => { setTaskDueDate(getNextWeek()); setDatePickerOpen(false); }}
+                              className={`w-full text-left px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 ${
+                                taskDueDate === getNextWeek()
+                                  ? "bg-blue-100 text-blue-700 font-medium"
+                                  : "text-slate-700 hover:bg-slate-100"
+                              }`}
+                            >
+                              <CalendarDays size={14} className="text-green-500" />
+                              Next Week
+                            </button>
+                          </div>
+
+                          {/* Divider */}
+                          <div className="border-t border-slate-200 mx-2" />
+
+                          {/* Custom Date Input */}
+                          <div className="p-2">
+                            <label className="text-xs text-slate-500 font-medium mb-1 block px-1">Custom date</label>
+                            <input
+                              type="date"
+                              value={taskDueDate}
+                              min={getToday()}
+                              onChange={(e) => { setTaskDueDate(e.target.value); setDatePickerOpen(false); }}
+                              className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
+                            />
+                          </div>
+
+                          {/* Clear Button */}
+                          {taskDueDate && (
+                            <div className="p-2 border-t border-slate-200">
+                              <button
+                                onClick={() => { setTaskDueDate(""); setDatePickerOpen(false); }}
+                                className="w-full text-center px-3 py-1.5 text-sm text-red-500 hover:bg-red-50 rounded-lg transition-colors font-medium"
+                              >
+                                Clear Due Date
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                     <button className="p-1 hover:bg-blue-100 rounded transition-colors text-slate-500">
                       <UserPlus size={18} />
                     </button>
                     <div className="relative">
                       <button
-                        onClick={() => setPriorityDropdownOpen(!priorityDropdownOpen)}
+                        onClick={() => { setPriorityDropdownOpen(!priorityDropdownOpen); setDatePickerOpen(false); }}
                         className={`p-1 rounded transition-colors ${
                           taskPriority === "high"
                             ? "bg-red-100 text-red-500"
@@ -485,6 +690,20 @@ function BoardDashboard() {
                     </div>
                   </div>
 
+                  {/* Due Date Badge */}
+                  {taskDueDate && (
+                    <div className={`flex items-center gap-1 mb-3 px-2 py-1 rounded-md text-xs font-medium w-fit ${getDueDateColor(taskDueDate)}`}>
+                      <CalendarDays size={12} />
+                      <span>Due: {formatDueDate(taskDueDate)}</span>
+                      <button
+                        onClick={() => setTaskDueDate("")}
+                        className="ml-1 hover:opacity-70 transition-opacity"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  )}
+
                   {/* Action Buttons */}
                   <div className="flex gap-2">
                     <button
@@ -516,6 +735,18 @@ function BoardDashboard() {
           </div>
         ))}
       </div>
+
+      {/* Task Detail Modal */}
+      {selectedTask && (
+        <TaskDetailModal
+          task={selectedTask.task}
+          column={selectedTask.column}
+          onClose={() => setSelectedTask(null)}
+          onUpdateTask={handleUpdateTask}
+          onDeleteTask={handleDeleteTask}
+          onChangeStatus={handleModalChangeStatus}
+        />
+      )}
     </div>
   );
 }

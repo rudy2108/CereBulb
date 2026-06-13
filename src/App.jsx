@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import Header from './Components/Header';
 import SubHeader from './Components/Subheader';
-import BoardDashboard from './Components/BoardDashboard';
+import BoardDashboard from './Components/boardDashboard';
 import ListDashboard from './Components/ListDashboard';
 
 function App(){
